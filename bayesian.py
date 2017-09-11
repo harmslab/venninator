@@ -7,9 +7,7 @@ __date__ = "2017-05-10"
 import numpy as np
 import scipy.stats
 import scipy.optimize as optimize
-import corner
-
-import re
+import corner, emcee
 
 class Fitter:
     """
@@ -115,8 +113,7 @@ class Fitter:
         if np.sum(param < self._bounds[0,:]) > 0 or np.sum(param > self._bounds[1,:]) > 0:
             return -np.inf
 
-        # otherwise, uniform
-        return 0.0
+        return self._prior(param)
 
     def ln_prob(self,param):
         """
@@ -149,7 +146,7 @@ class Fitter:
         # log posterior is log prior plus log likelihood 
         return ln_prior + ln_like
 
-    def fit(self,model,parameters,bounds,y_obs,y_err=None,param_names=None):
+    def fit(self,model,prior,parameters,bounds,y_obs,y_err=None,param_names=None):
         """
         Fit the parameters.       
  
@@ -158,7 +155,9 @@ class Fitter:
 
         model : callable
             model to fit.  model should take "parameters" as its only argument.
-            this should (usually) be GlobalFit._y_calc
+        prior : callable
+            function returning priors given parameters.  should take "parameters" 
+            as its only arguments.
         parameters : array of floats
             parameters to be optimized.  usually constructed by GlobalFit._prep_fit
         bounds : list
@@ -173,6 +172,7 @@ class Fitter:
         """
 
         self._model = model
+        self._prior = prior
         self._y_obs = y_obs
 
         # Convert the bounds (list of lower and upper lists) into a 2d numpy array
@@ -309,8 +309,6 @@ class Fitter:
             the parameter is *excluded* from the plot.
         """
    
-        skip_pattern = re.compile("|".join(filter_params))
- 
         s = self._samples
 
         to_plot = []
@@ -318,11 +316,6 @@ class Fitter:
         param_names = []
         est_values = []
         for i in range(s.shape[1]):
-         
-            # look for patterns to skip 
-            if skip_pattern.search(self._param_names[i]):
-                continue
-
             param_names.append(self._param_names[i])
             to_plot.append(s[:,i])
             corner_range.append(tuple([np.min(s[:,i])-0.5,np.max(s[:,i])+0.5]))

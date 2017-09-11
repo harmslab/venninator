@@ -1,5 +1,10 @@
+from .bayesian import Fitter
+
 import numpy as np 
+import scipy.stats
+
 import itertools, copy
+
 
 class SetEstimator:
     """
@@ -76,11 +81,11 @@ class SetEstimator:
             # Make sure that keys are in the right format
             new_c = list(c)
             new_c.sort()
-            new_c = tuple(c)
+            new_c = tuple(new_c)
 
             if c == "-":
                 new_c = tuple()
-                
+
             if new_c not in self.venn_regions:
                 err = "venn region {} not recognized.\n".format(c)
                 raise ValueError(err)
@@ -103,9 +108,23 @@ class SetEstimator:
         self._count_dict = copy.copy(tmp_count_dict)
 
         # Create structures for estimator
+        self._num_counts = sum(list(self._count_dict.values()))
         self._est_count_dict = copy.copy(self._count_dict)
         self._est_fp = copy.copy(self._fp)
         self._est_fn = copy.copy(self._fn)
+
+        # Create arrays holding false positive and false negative priors
+        fpfn_prior_means = []
+        fpfn_prior_sd = []
+        for c in self.categories:
+            fpfn_prior_means.append(self._fp[c])
+            fpfn_prior_sd.append(0.1)
+        for c in self.categories:
+            fpfn_prior_means.append(self._fn[c])
+            fpfn_prior_sd.append(0.1)
+        
+        self._fpfn_prior_means = np.array(fpfn_prior_means)
+        self._fpfn_prior_sd = np.array(fpfn_prior_sd)
 
         self._obs_count_vector = np.array([self._count_dict[s] for s in self.venn_regions],dtype=float)
 
@@ -206,8 +225,7 @@ class SetEstimator:
         # region given a set of observed sizes
         self._inv_trans_mat = np.linalg.inv(self._trans_mat)
   
-   
-    def model(self,param):
+    def _model(self,param):
         """
         Model that can be fed into a regression/sampling tool.  It takes an
         array of floats, maps these back to the underlyihng model, rebuilds
@@ -258,7 +276,106 @@ class SetEstimator:
         prediction = np.dot(c,self._trans_mat)
 
         return prediction
-         
+    
+    def _prior(self,param):
+        """
+        Return the prior for a given set of parameters.
+        
+        Model that can be fed into a regression/sampling tool.  It takes an
+        array of floats, maps these back to the underlyihng model, rebuilds
+        the transition matrix, and then returns the counts that would be 
+        observed given these parameters. The order of the "param" array should
+        be: 
+
+        counts in each venn region (in order in self.venn_regions)
+        fp rates (in order in categories)
+        fn rates (in order in categories)
+        """
+    
+        # Prior saying the total number of counts can't move 
+        #counts = np.sum(param[:len(self.venn_regions)])
+        #if counts < LOW_PRIOR*self._num_counts or counts > HIGH_PRIOR*self._num_counts:
+        #    return -np.inf
+      
+        # Do not allow negative counts
+        if np.sum(param[:len(self.venn_regions)] < 0) > 0:
+            return -np.inf 
+
+        # Do not allow rates below 0
+        if np.sum(param[len(self.venn_regions):] < 0) > 0:
+            return -np.inf 
+
+        # Do not allow rates above 1
+        if np.sum(param[len(self.venn_regions):] > 1) > 0:
+            return -np.inf 
+        
+        # Apply gaussian priors to each false negative and false positive rate
+        prior = 0.0
+        for i in range(len(param[len(self.venn_regions):])):
+            index = i + len(self.venn_regions)
+            prior += np.log(scipy.stats.norm.pdf(param[index],
+                                                 self._fpfn_prior_means[i],
+                                                 self._fpfn_prior_sd[i]))
+    
+        return prior 
+
+    @property
+    def _y_obs(self):
+        """
+        Array of observed counts for each venn region.  Stable sort order.
+        """
+
+        return np.array([self._count_dict[v] for v in self.venn_regions],
+                        dtype=float)
+
+    def fit(self,num_walkers=100,initial_walker_spread=1e-4,ml_guess=True,
+                 num_steps=100,burn_in=0.1,num_threads=1):
+
+
+        self._f = Fitter(num_walkers=num_walkers,
+                         initial_walker_spread=initial_walker_spread,
+                         ml_guess=ml_guess,
+                         num_steps=num_steps,
+                         burn_in=burn_in,
+                         num_threads=num_threads)
+
+        param_names = []
+        params = []
+        upper = []
+        lower = []
+        for v in self.venn_regions:
+            if v == tuple([]):
+                param_names.append("-")
+            else:
+                param_names.append("-".join(v))
+            params.append(self._count_dict[v])
+            upper.append(np.inf)
+            lower.append(-np.inf)
+
+        for c in self.categories:
+            param_names.append("{}_fp".format(c))
+            params.append(self._fp[c])
+            upper.append(np.inf)
+            lower.append(-np.inf)
+
+        for c in self.categories:
+            param_names.append("{}_fn".format(c))
+            params.append(self._fn[c])
+            upper.append(np.inf)
+            lower.append(-np.inf)
+
+        params = np.array(params,dtype=float)
+        bounds = [lower,upper]
+
+        self._f.fit(model=self._model,
+                    prior=self._prior,
+                    parameters=params,
+                    bounds=bounds,
+                    y_obs=self._y_obs,
+                    param_names=param_names)
+
+           
+        return self._f.estimate
 
     def pretty_trans_mat(self):
         """
@@ -280,14 +397,6 @@ class SetEstimator:
         for i in range(len(estimated_counts)):
             print("{:5s} {:10.3f}".format("".join(self.venn_regions[i]),estimated_counts[i]))
         
-    @property
-    def fn(self):
-        return self._fn
-    
-    @property
-    def fp(self):
-        return self._fp
-    
     @property
     def venn_regions(self):
         """
