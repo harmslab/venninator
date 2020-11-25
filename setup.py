@@ -3,7 +3,7 @@ __description__ = \
 estimate overlaps between sets with false positive and false negative rates
 """
 
-__version__ = 0.1
+__version__ = "v0.1"
 
 import sys 
 if sys.version_info[0] < 3:
