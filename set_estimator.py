@@ -118,10 +118,10 @@ class SetEstimator:
         fpfn_prior_sd = []
         for c in self.categories:
             fpfn_prior_means.append(self._fp[c])
-            fpfn_prior_sd.append(0.1)
+            fpfn_prior_sd.append(0.2)
         for c in self.categories:
             fpfn_prior_means.append(self._fn[c])
-            fpfn_prior_sd.append(0.1)
+            fpfn_prior_sd.append(0.2)
         
         self._fpfn_prior_means = np.array(fpfn_prior_means)
         self._fpfn_prior_sd = np.array(fpfn_prior_sd)
@@ -300,6 +300,10 @@ class SetEstimator:
         # Do not allow negative counts
         if np.sum(param[:len(self.venn_regions)] < 0) > 0:
             return -np.inf 
+
+        # Force the total number of peptides to sum to (almost) self._num_counts
+        if np.abs(np.sum(param[:len(self.venn_regions)]) - self._num_counts) > 0.05*self._num_counts:
+            return -np.inf
 
         # Do not allow rates below 0
         if np.sum(param[len(self.venn_regions):] < 0) > 0:
