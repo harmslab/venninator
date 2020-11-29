@@ -10,7 +10,6 @@ if sys.version_info[0] < 3:
     sys.exit('Sorry, Python < 3.x is not supported')
 
 from setuptools import setup, find_packages
-import numpy
 
 setup(name="venninator",
       packages=find_packages(),
@@ -22,7 +21,7 @@ setup(name="venninator",
       url='https://github.com/harmslab/venninator',
       download_url="https://github.com/harmslab/venninator/archive/{}.tar.gz".format(__version__),
       install_requires=["numpy","scipy","emcee","corner"],
-      package_data={},
       zip_safe=False,
       classifiers=['Programming Language :: Python']
       )
+
